@@ -68,7 +68,7 @@ func TestResultResolver(t *testing.T) {
 
 func TestAggregateQuery(t *testing.T) {
 	db, mock, err := sqlmock.New()
-	if nil != err {
+	if err != nil {
 		t.Error(err)
 	}
 	var testData = []struct {
@@ -81,7 +81,7 @@ func TestAggregateQuery(t *testing.T) {
 	}{
 		{
 			sqlmock.NewRows([]string{"count(*)"}).AddRow(12),
-			"SELECT count\\(\\*\\) FROM tb1",
+			"select count\\(\\*\\) from tb1",
 			AggregateCount("*"),
 			12,
 			12,
@@ -89,7 +89,7 @@ func TestAggregateQuery(t *testing.T) {
 		},
 		{
 			sqlmock.NewRows([]string{"sum(age)"}).AddRow(math.MaxInt64),
-			"SELECT sum\\(age\\) FROM tb1",
+			"select sum\\(age\\) from tb1",
 			AggregateSum("age"),
 			math.MaxInt64,
 			float64(math.MaxInt64),
@@ -97,7 +97,7 @@ func TestAggregateQuery(t *testing.T) {
 		},
 		{
 			sqlmock.NewRows([]string{"avg(age)"}).AddRow(100.957),
-			"SELECT avg\\(age\\) FROM tb1",
+			"select avg\\(age\\) from tb1",
 			AggregateAvg("age"),
 			100,
 			100.957,
@@ -107,6 +107,103 @@ func TestAggregateQuery(t *testing.T) {
 			sqlmock.NewRows([]string{"sum(age)"}).AddRow(100.957),
 			"sum\\(age\\)",
 			AggregateSum("age"),
+			100,
+			100.957,
+			nil,
+		},
+		{
+			sqlmock.NewRows([]string{"twa(age)"}).AddRow(100.957),
+			"twa\\(age\\)",
+			AggregateTwa("age"),
+			100,
+			100.957,
+			nil,
+		},
+		{
+			sqlmock.NewRows([]string{"leastsquares(age,1,1)"}).AddRow(100.957),
+			"leastsquares\\(age,1,1\\)",
+			AggregateLeastsquares("age", 1, 1),
+			100,
+			100.957,
+			nil,
+		},
+		{
+			sqlmock.NewRows([]string{"top(age,10)"}).AddRow(100.957),
+			"top\\(age,10\\)",
+			AggregateTop("age", 10),
+			100,
+			100.957,
+			nil,
+		},
+		{
+			sqlmock.NewRows([]string{"bottom(age,10)"}).AddRow(100.957),
+			"bottom\\(age,10\\)",
+			AggregateBottom("age", 10),
+			100,
+			100.957,
+			nil,
+		},
+		{
+			sqlmock.NewRows([]string{"first(age)"}).AddRow(100.957),
+			"first\\(age\\)",
+			AggregateFirst("age"),
+			100,
+			100.957,
+			nil,
+		},
+		{
+			sqlmock.NewRows([]string{"last(age)"}).AddRow(100.957),
+			"last\\(age\\)",
+			AggregateLast("age"),
+			100,
+			100.957,
+			nil,
+		},
+		{
+			sqlmock.NewRows([]string{"percentile(age,10)"}).AddRow(100.957),
+			"percentile\\(age,10\\)",
+			AggregatePercentile("age", 10),
+			100,
+			100.957,
+			nil,
+		},
+		{
+			sqlmock.NewRows([]string{"apercentile(age,10)"}).AddRow(100.957),
+			"apercentile\\(age,10\\)",
+			AggregateAPercentile("age", 10),
+			100,
+			100.957,
+			nil,
+		},
+		{
+			sqlmock.NewRows([]string{"last_row(age)"}).AddRow(100.957),
+			"last_row\\(age\\)",
+			AggregateLastRow("age"),
+			100,
+			100.957,
+			nil,
+		},
+		{
+			sqlmock.NewRows([]string{"spread(age)"}).AddRow(100.957),
+			"spread\\(age\\)",
+			AggregateSpread("age"),
+			100,
+			100.957,
+			nil,
+		},
+		{
+			sqlmock.NewRows([]string{"diff(age)"}).AddRow(100.957),
+			"diff\\(age\\)",
+			AggregateDiff("age"),
+			100,
+			100.957,
+			nil,
+		},
+
+		{
+			sqlmock.NewRows([]string{"stddev(age)"}).AddRow(100.957),
+			"stddev\\(age\\)",
+			AggregateStddev("age"),
 			100,
 			100.957,
 			nil,

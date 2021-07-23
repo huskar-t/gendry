@@ -3,6 +3,7 @@ package builder
 import (
 	"context"
 	"database/sql"
+	"github.com/didi/gendry/builder/pool"
 	"reflect"
 	"strconv"
 )
@@ -10,11 +11,11 @@ import (
 // AggregateQuery is a helper function to execute the aggregate query and return the result
 func AggregateQuery(ctx context.Context, db *sql.DB, table string, where map[string]interface{}, aggregate AggregateSymbleBuilder) (ResultResolver, error) {
 	cond, vals, err := BuildSelect(table, where, []string{aggregate.Symble()})
-	if nil != err {
+	if err != nil {
 		return resultResolve{0}, err
 	}
 	rows, err := db.QueryContext(ctx, cond, vals...)
-	if nil != err {
+	if err != nil {
 		return resultResolve{0}, err
 	}
 	var result interface{}
@@ -50,7 +51,7 @@ func (r resultResolve) Int64() int64 {
 		return int64(t)
 	case []uint8:
 		i64, err := strconv.ParseInt(string(t), 10, 64)
-		if nil != err {
+		if err != nil {
 			return int64(r.Float64())
 		}
 		return i64
@@ -81,35 +82,197 @@ type AggregateSymbleBuilder interface {
 	Symble() string
 }
 
-type agBuilder string
-
-func (a agBuilder) Symble() string {
-	return string(a)
+type agBuilder struct {
+	expr  string
+	alias string
 }
+
+func (a *agBuilder) Symble() string {
+	if a.expr == "" {
+		return ""
+	}
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.WriteString(a.expr)
+	if a.alias != "" {
+		b.WriteString(" as ")
+		b.WriteString(a.alias)
+	}
+	return b.String()
+}
+
+func (a *agBuilder) AS(alias string) *agBuilder {
+	a.alias = alias
+	return a
+}
+
+//count, max, min, avg, sum, twa, stddev, leastsquares, top, bottom, first, last, percentile, apercentile, last_row, spread, diff
 
 // AggregateCount count(col)
-func AggregateCount(col string) AggregateSymbleBuilder {
-	return agBuilder("count(" + col + ")")
-}
-
-// AggregateSum sum(col)
-func AggregateSum(col string) AggregateSymbleBuilder {
-	return agBuilder("sum(" + col + ")")
-}
-
-// AggregateAvg avg(col)
-func AggregateAvg(col string) AggregateSymbleBuilder {
-	return agBuilder("avg(" + col + ")")
+func AggregateCount(col string) *agBuilder {
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.WriteString("count(")
+	b.WriteString(col)
+	b.WriteByte(')')
+	return &agBuilder{expr: b.String()}
 }
 
 // AggregateMax max(col)
-func AggregateMax(col string) AggregateSymbleBuilder {
-	return agBuilder("max(" + col + ")")
+func AggregateMax(col string) *agBuilder {
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.WriteString("max(")
+	b.WriteString(col)
+	b.WriteByte(')')
+	return &agBuilder{expr: b.String()}
 }
 
 // AggregateMin min(col)
-func AggregateMin(col string) AggregateSymbleBuilder {
-	return agBuilder("min(" + col + ")")
+func AggregateMin(col string) *agBuilder {
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.WriteString("min(")
+	b.WriteString(col)
+	b.WriteByte(')')
+	return &agBuilder{expr: b.String()}
+}
+
+// AggregateAvg avg(col)
+func AggregateAvg(col string) *agBuilder {
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.WriteString("avg(")
+	b.WriteString(col)
+	b.WriteByte(')')
+	return &agBuilder{expr: b.String()}
+}
+
+// AggregateSum sum(col)
+func AggregateSum(col string) *agBuilder {
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.WriteString("sum(")
+	b.WriteString(col)
+	b.WriteByte(')')
+	return &agBuilder{expr: b.String()}
+}
+
+func AggregateTwa(col string) *agBuilder {
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.WriteString("twa(")
+	b.WriteString(col)
+	b.WriteByte(')')
+	return &agBuilder{expr: b.String()}
+}
+
+func AggregateStddev(col string) *agBuilder {
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.WriteString("stddev(")
+	b.WriteString(col)
+	b.WriteByte(')')
+	return &agBuilder{expr: b.String()}
+}
+
+func AggregateLeastsquares(col string, startVal, stepVal int) *agBuilder {
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.WriteString("leastsquares(")
+	b.WriteString(col)
+	b.WriteByte(',')
+	b.WriteString(strconv.Itoa(startVal))
+	b.WriteByte(',')
+	b.WriteString(strconv.Itoa(stepVal))
+	b.WriteByte(')')
+	return &agBuilder{expr: b.String()}
+}
+
+func AggregateTop(col string, k int) *agBuilder {
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.WriteString("top(")
+	b.WriteString(col)
+	b.WriteByte(',')
+	b.WriteString(strconv.Itoa(k))
+	b.WriteByte(')')
+	return &agBuilder{expr: b.String()}
+}
+
+func AggregateBottom(col string, k int) *agBuilder {
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.WriteString("bottom(")
+	b.WriteString(col)
+	b.WriteByte(',')
+	b.WriteString(strconv.Itoa(k))
+	b.WriteByte(')')
+	return &agBuilder{expr: b.String()}
+}
+
+func AggregateFirst(col string) *agBuilder {
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.WriteString("first(")
+	b.WriteString(col)
+	b.WriteByte(')')
+	return &agBuilder{expr: b.String()}
+}
+
+func AggregateLast(col string) *agBuilder {
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.WriteString("last(")
+	b.WriteString(col)
+	b.WriteByte(')')
+	return &agBuilder{expr: b.String()}
+}
+
+func AggregatePercentile(col string, p int) *agBuilder {
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.WriteString("percentile(")
+	b.WriteString(col)
+	b.WriteByte(',')
+	b.WriteString(strconv.Itoa(p))
+	b.WriteByte(')')
+	return &agBuilder{expr: b.String()}
+}
+func AggregateAPercentile(col string, p int) *agBuilder {
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.WriteString("apercentile(")
+	b.WriteString(col)
+	b.WriteByte(',')
+	b.WriteString(strconv.Itoa(p))
+	b.WriteByte(')')
+	return &agBuilder{expr: b.String()}
+}
+func AggregateLastRow(col string) *agBuilder {
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.WriteString("last_row(")
+	b.WriteString(col)
+	b.WriteByte(')')
+	return &agBuilder{expr: b.String()}
+}
+func AggregateSpread(col string) *agBuilder {
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.WriteString("spread(")
+	b.WriteString(col)
+	b.WriteByte(')')
+	return &agBuilder{expr: b.String()}
+}
+
+func AggregateDiff(col string) *agBuilder {
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.WriteString("diff(")
+	b.WriteString(col)
+	b.WriteByte(')')
+	return &agBuilder{expr: b.String()}
 }
 
 // OmitEmpty is a helper function to clear where map zero value

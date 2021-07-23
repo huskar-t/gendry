@@ -11,27 +11,31 @@ import (
 var (
 	errSplitEmptyKey = errors.New("[builder] couldn't split a empty string")
 	// ErrUnsupportedOperator reports there's unsupported operators in where-condition
-	ErrUnsupportedOperator       = errors.New("[builder] unsupported operator")
-	errOrValueType               = errors.New(`[builder] the value of "_or" must be of slice of map[string]interface{} type`)
-	errOrderByValueType          = errors.New(`[builder] the value of "_orderby" must be of string type`)
-	errGroupByValueType          = errors.New(`[builder] the value of "_groupby" must be of string type`)
-	errLimitValueType            = errors.New(`[builder] the value of "_limit" must be of []uint type`)
-	errLimitValueLength          = errors.New(`[builder] the value of "_limit" must contain one or two uint elements`)
-	errHavingValueType           = errors.New(`[builder] the value of "_having" must be of map[string]interface{}`)
-	errHavingUnsupportedOperator = errors.New(`[builder] "_having" contains unsupported operator`)
-	errLockModeValueType         = errors.New(`[builder] the value of "_lockMode" must be of string type`)
-	errNotAllowedLockMode        = errors.New(`[builder] the value of "_lockMode" is not allowed`)
-	errUpdateLimitType           = errors.New(`[builder] the value of "_limit" in update query must be one of int,uint,int64,uint64`)
-
+	ErrUnsupportedOperator     = errors.New("[builder] unsupported operator")
+	errOrValueType             = errors.New(`[builder] the value of "_or" must be of slice of map[string]interface{} type`)
+	errOrderByValueType        = errors.New(`[builder] the value of "_orderby" must be of string type`)
+	errGroupByValueType        = errors.New(`[builder] the value of "_groupby" must be of string type`)
+	errLimitValueType          = errors.New(`[builder] the value of "_limit" must be of []uint type`)
+	errLimitValueLength        = errors.New(`[builder] the value of "_limit" must contain one or two uint elements`)
+	errSLimitValueType         = errors.New(`[builder] the value of "_slimit" must be of []uint type`)
+	errSLimitValueLength       = errors.New(`[builder] the value of "_slimit" must contain one or two uint elements`)
+	errIntervalValueType       = errors.New(`[builder] the value of "_interval" must be of *Interval type`)
+	errIntervalValueError      = errors.New(`[builder] the value of "_interval" error`)
+	errNeedFillType            = errors.New(`[builder] the value of "_fill" must be of FillType`)
+	errFillValue               = errors.New(`[builder] the value of "_fill" must be in "NONE" "VALUE" "PREV" "NULL" "LINEAR" "NEXT"`)
+	errFillMissValue           = errors.New(`[builder] the value of "_fill" is "VALUE" miss "_fillvalue"`)
+	errFillValueTypeError      = errors.New(`[builder] the value of "_fillvalue" must be of Float64 type`)
 	errWhereInterfaceSliceType = `[builder] the value of "xxx %s" must be of []interface{} type`
 	errEmptySliceCondition     = `[builder] the value of "%s" must contain at least one element`
 
 	defaultIgnoreKeys = map[string]struct{}{
-		"_orderby":  struct{}{},
-		"_groupby":  struct{}{},
-		"_having":   struct{}{},
-		"_limit":    struct{}{},
-		"_lockMode": struct{}{},
+		"_orderby":   {},
+		"_groupby":   {},
+		"_limit":     {},
+		"_slimit":    {},
+		"_interval":  {},
+		"_fill":      {},
+		"_fillvalue": {},
 	}
 )
 
@@ -65,9 +69,10 @@ type eleLimit struct {
 func BuildSelect(table string, where map[string]interface{}, selectField []string) (cond string, vals []interface{}, err error) {
 	var orderBy string
 	var limit *eleLimit
+	var sLimit *eleLimit
 	var groupBy string
-	var having map[string]interface{}
-	var lockMode string
+	var interval string
+	var fill string
 	if val, ok := where["_orderby"]; ok {
 		s, ok := val.(string)
 		if !ok {
@@ -83,14 +88,6 @@ func BuildSelect(table string, where map[string]interface{}, selectField []strin
 			return
 		}
 		groupBy = strings.TrimSpace(s)
-		if "" != groupBy {
-			if h, ok := where["_having"]; ok {
-				having, err = resolveHaving(h)
-				if nil != err {
-					return
-				}
-			}
-		}
 	}
 	if val, ok := where["_limit"]; ok {
 		arr, ok := val.([]uint)
@@ -112,113 +109,78 @@ func BuildSelect(table string, where map[string]interface{}, selectField []strin
 			step:  step,
 		}
 	}
-	if val, ok := where["_lockMode"]; ok {
-		s, ok := val.(string)
+	if val, ok := where["_slimit"]; ok {
+		arr, ok := val.([]uint)
 		if !ok {
-			err = errLockModeValueType
+			err = errSLimitValueType
 			return
 		}
-		lockMode = strings.TrimSpace(s)
-		if _, ok := allowedLockMode[lockMode]; !ok {
-			err = errNotAllowedLockMode
+		if len(arr) != 2 {
+			if len(arr) == 1 {
+				arr = []uint{0, arr[0]}
+			} else {
+				err = errSLimitValueLength
+				return
+			}
+		}
+		begin, step := arr[0], arr[1]
+		sLimit = &eleLimit{
+			begin: begin,
+			step:  step,
+		}
+	}
+	if val, ok := where["_interval"]; ok {
+		value, ok := val.(*Interval)
+		if !ok {
+			err = errIntervalValueType
 			return
+		}
+		if value == nil || value.Value == 0 || value.Unit == "" {
+			err = errIntervalValueError
+			return
+		}
+		interval = value.String()
+	}
+	if val, ok := where["_fill"]; ok {
+		value, ok := val.(FillType)
+		if !ok {
+			err = errNeedFillType
+			return
+		}
+		if _, exist := FillTypeMap[value]; !exist {
+			err = errFillValue
+			return
+		}
+		if value == FillValue {
+			fillValue, ok := where["_fillvalue"]
+			if !ok {
+				err = errFillMissValue
+				return
+			}
+			v, ok := fillValue.(float64)
+			if !ok {
+				err = errFillValueTypeError
+				return
+			}
+			fill = fmt.Sprintf("(VALUE,%f)", v)
+		} else {
+			fill = string(value)
 		}
 	}
 	conditions, err := getWhereConditions(where, defaultIgnoreKeys)
-	if nil != err {
+	if err != nil {
 		return
 	}
-	if having != nil {
-		havingCondition, err1 := getWhereConditions(having, defaultIgnoreKeys)
-		if nil != err1 {
-			err = err1
-			return
-		}
-		conditions = append(conditions, nilComparable(0))
-		conditions = append(conditions, havingCondition...)
-	}
-	return buildSelect(table, selectField, groupBy, orderBy, lockMode, limit, conditions...)
-}
-
-func copyWhere(src map[string]interface{}) (target map[string]interface{}) {
-	target = make(map[string]interface{})
-	for k, v := range src {
-		target[k] = v
-	}
-	return
-}
-
-func resolveHaving(having interface{}) (map[string]interface{}, error) {
-	var havingMap map[string]interface{}
-	var ok bool
-	if havingMap, ok = having.(map[string]interface{}); !ok {
-		return nil, errHavingValueType
-	}
-	copiedMap := make(map[string]interface{})
-	for key, val := range havingMap {
-		_, operator, err := splitKey(key, val)
-		if nil != err {
-			return nil, err
-		}
-		if !isStringInSlice(strings.ToLower(operator), opOrder) {
-			return nil, errHavingUnsupportedOperator
-		}
-		copiedMap[key] = val
-	}
-	return copiedMap, nil
-}
-
-// BuildUpdate work as its name says
-func BuildUpdate(table string, where map[string]interface{}, update map[string]interface{}) (string, []interface{}, error) {
-	var limit uint
-	if v, ok := where["_limit"]; ok {
-		switch val := v.(type) {
-		case int:
-			limit = uint(val)
-		case uint:
-			limit = val
-		case int64:
-			limit = uint(val)
-		case uint64:
-			limit = uint(val)
-		default:
-			return "", nil, errUpdateLimitType
-		}
-	}
-	conditions, err := getWhereConditions(where, defaultIgnoreKeys)
-	if nil != err {
-		return "", nil, err
-	}
-	return buildUpdate(table, update, limit, conditions...)
-}
-
-// BuildDelete work as its name says
-func BuildDelete(table string, where map[string]interface{}) (string, []interface{}, error) {
-	conditions, err := getWhereConditions(where, defaultIgnoreKeys)
-	if nil != err {
-		return "", nil, err
-	}
-	return buildDelete(table, conditions...)
+	return buildSelect(table, selectField, groupBy, orderBy, sLimit, limit, interval, fill, conditions...)
 }
 
 // BuildInsert work as its name says
-func BuildInsert(table string, data []map[string]interface{}) (string, []interface{}, error) {
-	return buildInsert(table, data, commonInsert)
+func BuildInsert(table string, data [][]interface{}) (string, []interface{}, error) {
+	return buildInsert(table, "", nil, data, commonInsert)
 }
 
-// BuildInsertIgnore work as its name says
-func BuildInsertIgnore(table string, data []map[string]interface{}) (string, []interface{}, error) {
-	return buildInsert(table, data, ignoreInsert)
-}
-
-// BuildReplaceInsert work as its name says
-func BuildReplaceInsert(table string, data []map[string]interface{}) (string, []interface{}, error) {
-	return buildInsert(table, data, replaceInsert)
-}
-
-// BuildInsertOnDuplicateKey builds an INSERT ... ON DUPLICATE KEY UPDATE clause.
-func BuildInsertOnDuplicate(table string, data []map[string]interface{}, update map[string]interface{}) (string, []interface{}, error) {
-	return buildInsertOnDuplicate(table, data, update)
+func BuildInsertStable(table string, sTable string, tags []interface{}, data [][]interface{}) (string, []interface{}, error) {
+	return buildInsert(table, sTable, tags, data, commonInsert)
 }
 
 func isStringInSlice(str string, arr []string) bool {
@@ -256,7 +218,7 @@ func getWhereConditions(where map[string]interface{}, ignoreKeys map[string]stru
 					continue
 				}
 				orNestWhere, err := getWhereConditions(orWhere, ignoreKeys)
-				if nil != err {
+				if err != nil {
 					return nil, err
 				}
 				orWhereComparable = append(orWhereComparable, NestWhere(orNestWhere))
@@ -265,7 +227,7 @@ func getWhereConditions(where map[string]interface{}, ignoreKeys map[string]stru
 			continue
 		}
 		field, operator, err = splitKey(key, val)
-		if nil != err {
+		if err != nil {
 			return nil, err
 		}
 		operator = strings.ToLower(operator)
@@ -278,7 +240,7 @@ func getWhereConditions(where map[string]interface{}, ignoreKeys map[string]stru
 		wms.add(operator, field, val)
 	}
 	whereComparables, err := buildWhereCondition(wms)
-	if nil != err {
+	if err != nil {
 		return nil, err
 	}
 	comparables = append(comparables, whereComparables...)
@@ -317,28 +279,28 @@ var op2Comparable = map[string]compareProducer{
 	},
 	opIn: func(m map[string]interface{}) (Comparable, error) {
 		wp, err := convertWhereMapToWhereMapSlice(m, opIn)
-		if nil != err {
+		if err != nil {
 			return nil, err
 		}
 		return In(wp), nil
 	},
 	opNotIn: func(m map[string]interface{}) (Comparable, error) {
 		wp, err := convertWhereMapToWhereMapSlice(m, opNotIn)
-		if nil != err {
+		if err != nil {
 			return nil, err
 		}
 		return NotIn(wp), nil
 	},
 	opBetween: func(m map[string]interface{}) (Comparable, error) {
 		wp, err := convertWhereMapToWhereMapSlice(m, opBetween)
-		if nil != err {
+		if err != nil {
 			return nil, err
 		}
 		return Between(wp), nil
 	},
 	opNotBetween: func(m map[string]interface{}) (Comparable, error) {
 		wp, err := convertWhereMapToWhereMapSlice(m, opNotBetween)
-		if nil != err {
+		if err != nil {
 			return nil, err
 		}
 		return NotBetween(wp), nil
@@ -380,7 +342,7 @@ func buildWhereCondition(mapSet *whereMapSet) ([]Comparable, error) {
 			return nil, ErrUnsupportedOperator
 		}
 		cp, err := f(whereMap)
-		if nil != err {
+		if err != nil {
 			return nil, err
 		}
 		cpArr = append(cpArr, cp)
@@ -485,7 +447,7 @@ func NamedQuery(sql string, data map[string]interface{}) (string, []interface{},
 		}
 		return createMultiPlaceholders(length)
 	})
-	if nil != err {
+	if err != nil {
 		return "", nil, err
 	}
 	return cond, vals, nil
@@ -508,3 +470,50 @@ func createMultiPlaceholders(num int) string {
 	}
 	return string(buff)
 }
+
+type IntervalUnitType string
+
+//u(微秒)、a(毫秒)、s(秒)、m(分)、h(小时)、d(天)、w(周) n(自然月) 和 y(自然年)
+const (
+	Microsecond IntervalUnitType = "u"
+	Millisecond IntervalUnitType = "a"
+	Second      IntervalUnitType = "s"
+	Minute      IntervalUnitType = "m"
+	Hour        IntervalUnitType = "h"
+	Day         IntervalUnitType = "d"
+	Week        IntervalUnitType = "w"
+	Month       IntervalUnitType = "n"
+	Year        IntervalUnitType = "y"
+)
+
+type Interval struct {
+	Value uint
+	Unit  IntervalUnitType
+}
+
+func (i *Interval) String() string {
+	if i == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d%s", i.Value, i.Unit)
+}
+
+type FillType string
+
+var FillTypeMap = map[FillType]struct{}{
+	FillNone:   {},
+	FillValue:  {},
+	FillPrev:   {},
+	FillNull:   {},
+	FillLinear: {},
+	FillNext:   {},
+}
+
+const (
+	FillNone   FillType = "NONE"
+	FillValue  FillType = "VALUE"
+	FillPrev   FillType = "PREV"
+	FillNull   FillType = "NULL"
+	FillLinear FillType = "LINEAR"
+	FillNext   FillType = "NEXT"
+)

@@ -3,19 +3,13 @@ package builder
 import (
 	"errors"
 	"fmt"
+	"github.com/didi/gendry/builder/pool"
 	"sort"
 	"strings"
 )
 
 var (
-	errInsertDataNotMatch = errors.New("insert data not match")
-	errInsertNullData     = errors.New("insert null data")
-	errOrderByParam       = errors.New("order param only should be ASC or DESC")
-
-	allowedLockMode = map[string]string{
-		"share":     " LOCK IN SHARE MODE",
-		"exclusive": " FOR UPDATE",
-	}
+	errInsertNullData = errors.New("insert null data")
 )
 
 //the order of a map is unpredicatable so we need a sort algorithm to sort the fields
@@ -34,9 +28,9 @@ type NullType byte
 
 func (nt NullType) String() string {
 	if nt == IsNull {
-		return "IS NULL"
+		return "is null"
 	}
-	return "IS NOT NULL"
+	return "is not null"
 }
 
 const (
@@ -96,7 +90,7 @@ func (l Like) Build() ([]string, []interface{}) {
 	defaultSortAlgorithm(cond)
 	for j := 0; j < len(cond); j++ {
 		val := l[cond[j]]
-		cond[j] = cond[j] + " LIKE ?"
+		cond[j] = cond[j] + " like ?"
 		vals = append(vals, val)
 	}
 	return cond, vals
@@ -117,7 +111,7 @@ func (l NotLike) Build() ([]string, []interface{}) {
 	defaultSortAlgorithm(cond)
 	for j := 0; j < len(cond); j++ {
 		val := l[cond[j]]
-		cond[j] = cond[j] + " NOT LIKE ?"
+		cond[j] = cond[j] + " not like ?"
 		vals = append(vals, val)
 	}
 	return cond, vals
@@ -194,9 +188,20 @@ func (i In) Build() ([]string, []interface{}) {
 }
 
 func buildIn(field string, vals []interface{}) (cond string) {
-	cond = strings.TrimRight(strings.Repeat("?,", len(vals)), ",")
-	cond = fmt.Sprintf("%s IN (%s)", quoteField(field), cond)
-	return
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.Grow(len(field) + len(vals)*2 + 5)
+	b.WriteString(field)
+	b.WriteString(" in (")
+
+	for i := 0; i < len(vals); i++ {
+		b.WriteByte('?')
+		if i != len(vals)-1 {
+			b.WriteByte(',')
+		}
+	}
+	b.WriteByte(')')
+	return b.String()
 }
 
 //NotIn means not in
@@ -222,9 +227,20 @@ func (i NotIn) Build() ([]string, []interface{}) {
 }
 
 func buildNotIn(field string, vals []interface{}) (cond string) {
-	cond = strings.TrimRight(strings.Repeat("?,", len(vals)), ",")
-	cond = fmt.Sprintf("%s NOT IN (%s)", quoteField(field), cond)
-	return
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.Grow(len(field) + len(vals)*2 + 9)
+	b.WriteString(field)
+	b.WriteString(" not in (")
+
+	for i := 0; i < len(vals); i++ {
+		b.WriteByte('?')
+		if i != len(vals)-1 {
+			b.WriteByte(',')
+		}
+	}
+	b.WriteByte(')')
+	return b.String()
 }
 
 type Between map[string][]interface{}
@@ -246,7 +262,7 @@ func betweenBuilder(bt map[string][]interface{}, notBetween bool) ([]string, []i
 	for j := 0; j < len(cond); j++ {
 		val := bt[cond[j]]
 		cond_j, err := buildBetween(notBetween, cond[j], val)
-		if nil != err {
+		if err != nil {
 			continue
 		}
 		cond[j] = cond_j
@@ -267,11 +283,11 @@ func buildBetween(notBetween bool, key string, vals []interface{}) (string, erro
 	}
 	var operator string
 	if notBetween {
-		operator = "NOT BETWEEN"
+		operator = "not between"
 	} else {
-		operator = "BETWEEN"
+		operator = "between"
 	}
-	return fmt.Sprintf("(%s %s ? AND ?)", key, operator), nil
+	return fmt.Sprintf("(%s %s ? and ?)", key, operator), nil
 }
 
 type NestWhere []Comparable
@@ -279,7 +295,7 @@ type NestWhere []Comparable
 func (nw NestWhere) Build() ([]string, []interface{}) {
 	var cond []string
 	var vals []interface{}
-	nestWhereString, nestWhereVals := whereConnector("AND", nw...)
+	nestWhereString, nestWhereVals := whereConnector("and", nw...)
 	cond = append(cond, nestWhereString)
 	vals = nestWhereVals
 	return cond, vals
@@ -290,7 +306,7 @@ type OrWhere []Comparable
 func (ow OrWhere) Build() ([]string, []interface{}) {
 	var cond []string
 	var vals []interface{}
-	orWhereString, orWhereVals := whereConnector("OR", ow...)
+	orWhereString, orWhereVals := whereConnector("or", ow...)
 	cond = append(cond, orWhereString)
 	vals = orWhereVals
 	return cond, vals
@@ -317,7 +333,13 @@ func build(m map[string]interface{}, op string) ([]string, []interface{}) {
 }
 
 func assembleExpression(field, op string) string {
-	return quoteField(field) + op + "?"
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.Grow(len(field) + len(op) + 1)
+	b.WriteString(field)
+	b.WriteString(op)
+	b.WriteByte('?')
+	return b.String()
 }
 
 func resolveKV(m map[string]interface{}) (keys []string, vals []interface{}) {
@@ -334,7 +356,7 @@ func resolveKV(m map[string]interface{}) (keys []string, vals []interface{}) {
 func resolveFields(m map[string]interface{}) []string {
 	var fields []string
 	for k := range m {
-		fields = append(fields, quoteField(k))
+		fields = append(fields, k)
 	}
 	defaultSortAlgorithm(fields)
 	return fields
@@ -361,145 +383,93 @@ func whereConnector(andOr string, conditions ...Comparable) (string, []interface
 	return whereString, values
 }
 
-// deprecated
-func quoteField(field string) string {
-	return field
-}
-
 type insertType string
 
 const (
-	commonInsert  insertType = "INSERT INTO"
-	ignoreInsert  insertType = "INSERT IGNORE INTO"
-	replaceInsert insertType = "REPLACE INTO"
+	commonInsert insertType = "insert into"
 )
 
-func buildInsert(table string, setMap []map[string]interface{}, insertType insertType) (string, []interface{}, error) {
-	format := "%s %s (%s) VALUES %s"
-	var fields []string
-	var vals []interface{}
-	if len(setMap) < 1 {
+func buildInsert(table string, sTable string, tags []interface{}, setList [][]interface{}, insertType insertType) (string, []interface{}, error) {
+	//	INSERT INTO
+	//	tb_name
+	//	[USING stb_name [(tag1_name, ...)] TAGS (tag1_value, ...)]
+	//	[(field1_name, ...)]
+	//	VALUES (field1_value, ...) [(field1_value2, ...) ...] | FILE csv_file_path
+	//	[tb2_name
+	//	[USING stb_name [(tag1_name, ...)] TAGS (tag1_value, ...)]
+	//	[(field1_name, ...)]
+	//	VALUES (field1_value, ...) [(field1_value2, ...) ...] | FILE csv_file_path
+	//	...];
+	if len(setList) < 1 {
 		return "", nil, errInsertNullData
 	}
-	fields = resolveFields(setMap[0])
-	placeholder := "(" + strings.TrimRight(strings.Repeat("?,", len(fields)), ",") + ")"
-	var sets []string
-	for _, mapItem := range setMap {
-		sets = append(sets, placeholder)
-		for _, field := range fields {
-			val, ok := mapItem[field]
-			if !ok {
-				return "", nil, errInsertDataNotMatch
-			}
-			vals = append(vals, val)
+	b := pool.BytesPoolGet()
+	defer pool.BytesPoolPut(b)
+	b.WriteString(string(insertType))
+	b.WriteByte(' ')
+	b.WriteString(table)
+	var vals []interface{}
+	if sTable != "" {
+		b.WriteString(" using ")
+		b.WriteString(sTable)
+		b.WriteString(" tags(")
+		b.WriteString(strings.TrimRight(strings.Repeat("?,", len(tags)), ","))
+		b.WriteByte(')')
+		for _, tag := range tags {
+			vals = append(vals, tag)
 		}
 	}
-	return fmt.Sprintf(format, insertType, quoteField(table), strings.Join(fields, ","), strings.Join(sets, ",")), vals, nil
-}
-
-func buildInsertOnDuplicate(table string, data []map[string]interface{}, update map[string]interface{}) (string, []interface{}, error) {
-	insertCond, insertVals, err := buildInsert(table, data, commonInsert)
-	if err != nil {
-		return "", nil, err
-	}
-	sets, updateVals := resolveUpdate(update)
-	format := "%s ON DUPLICATE KEY UPDATE %s"
-	cond := fmt.Sprintf(format, insertCond, sets)
-	vals := append(insertVals, updateVals...)
-	return cond, vals, nil
-}
-
-func resolveUpdate(update map[string]interface{}) (string, []interface{}) {
-	keys, vals := resolveKV(update)
-	var sets string
-	for _, k := range keys {
-		sets += fmt.Sprintf("%s=?,", quoteField(k))
-	}
-	sets = strings.TrimRight(sets, ",")
-	return sets, vals
-}
-
-func buildUpdate(table string, update map[string]interface{}, limit uint, conditions ...Comparable) (string, []interface{}, error) {
-	format := "UPDATE %s SET %s"
-	sets, vals := resolveUpdate(update)
-	cond := fmt.Sprintf(format, quoteField(table), sets)
-	whereString, whereVals := whereConnector("AND", conditions...)
-	if "" != whereString {
-		cond = fmt.Sprintf("%s WHERE %s", cond, whereString)
-		vals = append(vals, whereVals...)
-	}
-	if limit > 0 {
-		cond += " LIMIT ?"
-		vals = append(vals, int(limit))
-	}
-	return cond, vals, nil
-}
-
-func buildDelete(table string, conditions ...Comparable) (string, []interface{}, error) {
-	whereString, vals := whereConnector("AND", conditions...)
-	if "" == whereString {
-		return fmt.Sprintf("DELETE FROM %s", table), nil, nil
-	}
-	format := "DELETE FROM %s WHERE %s"
-
-	cond := fmt.Sprintf(format, quoteField(table), whereString)
-	return cond, vals, nil
-}
-
-func splitCondition(conditions []Comparable) ([]Comparable, []Comparable) {
-	var having []Comparable
-	var i int
-	for i = len(conditions) - 1; i >= 0; i-- {
-		if _, ok := conditions[i].(nilComparable); ok {
-			break
+	b.WriteString(" values ")
+	placeholder := "(" + strings.TrimRight(strings.Repeat("?,", len(setList[0])), ",") + ")"
+	for i := 0; i < len(setList); i++ {
+		b.WriteString(placeholder)
+		if i != len(setList)-1 {
+			b.WriteByte(',')
 		}
+		vals = append(vals, setList[i]...)
 	}
-	if i >= 0 && i < len(conditions)-1 {
-		having = conditions[i+1:]
-		return conditions[:i], having
-	}
-	return conditions, nil
+	return b.String(), vals, nil
 }
 
-func buildSelect(table string, ufields []string, groupBy, orderBy, lockMode string, limit *eleLimit, conditions ...Comparable) (string, []interface{}, error) {
+func buildSelect(table string, uFields []string, groupBy, orderBy string, sLimit, limit *eleLimit, interval string, fill string, conditions ...Comparable) (string, []interface{}, error) {
 	fields := "*"
-	if len(ufields) > 0 {
-		for i := range ufields {
-			ufields[i] = quoteField(ufields[i])
-		}
-		fields = strings.Join(ufields, ",")
+	if len(uFields) > 0 {
+		fields = strings.Join(uFields, ",")
 	}
 	bd := strings.Builder{}
-	bd.WriteString("SELECT ")
+	bd.WriteString("select ")
 	bd.WriteString(fields)
-	bd.WriteString(" FROM ")
+	bd.WriteString(" from ")
 	bd.WriteString(table)
-	where, having := splitCondition(conditions)
-	whereString, vals := whereConnector("AND", where...)
-	if "" != whereString {
-		bd.WriteString(" WHERE ")
+	whereString, vals := whereConnector("and", conditions...)
+	if whereString != "" {
+		bd.WriteString(" where ")
 		bd.WriteString(whereString)
 	}
-	if "" != groupBy {
-		bd.WriteString(" GROUP BY ")
+	if interval != "" {
+		bd.WriteString(" interval(")
+		bd.WriteString(interval)
+		bd.WriteByte(')')
+	}
+	if fill != "" {
+		bd.WriteString(" fill ")
+		bd.WriteString(fill)
+	}
+	if groupBy != "" {
+		bd.WriteString(" group by ")
 		bd.WriteString(groupBy)
 	}
-	if nil != having {
-		havingString, havingVals := whereConnector("AND", having...)
-		bd.WriteString(" HAVING ")
-		bd.WriteString(havingString)
-		vals = append(vals, havingVals...)
-	}
-	if "" != orderBy {
-		bd.WriteString(" ORDER BY ")
+	if orderBy != "" {
+		bd.WriteString(" order by ")
 		bd.WriteString(orderBy)
 	}
-	if nil != limit {
-		bd.WriteString(" LIMIT ?,?")
-		vals = append(vals, int(limit.begin), int(limit.step))
+	if sLimit != nil {
+		bd.WriteString(" slimit ?,?")
+		vals = append(vals, int(sLimit.begin), int(sLimit.step))
 	}
-	if "" != lockMode {
-		bd.WriteString(allowedLockMode[lockMode])
+	if limit != nil {
+		bd.WriteString(" limit ?,?")
+		vals = append(vals, int(limit.begin), int(limit.step))
 	}
 	return bd.String(), vals, nil
 }

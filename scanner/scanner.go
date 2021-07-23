@@ -84,7 +84,7 @@ func Scan(rows Rows, target interface{}) error {
 	}
 
 	data, err := resolveDataFromRows(rows)
-	if nil != err {
+	if err != nil {
 		return err
 	}
 
@@ -117,7 +117,7 @@ func ScanMap(rows Rows) ([]map[string]interface{}, error) {
 // []uint8 to string
 func ScanMapDecode(rows Rows) ([]map[string]interface{}, error) {
 	results, err := resolveDataFromRows(rows)
-	if nil != err {
+	if err != nil {
 		return nil, err
 	}
 	for i := 0; i < len(results); i++ {
@@ -216,7 +216,7 @@ func bindSlice(arr []map[string]interface{}, target interface{}) error {
 		newObj := reflect.New(typeObj)
 		newObjInterface := newObj.Interface()
 		err = bind(arr[i], newObjInterface)
-		if nil != err {
+		if err != nil {
 			return err
 		}
 		valueArrObj = reflect.Append(valueArrObj, newObj.Elem())
@@ -226,9 +226,6 @@ func bindSlice(arr []map[string]interface{}, target interface{}) error {
 }
 
 func bind(result map[string]interface{}, target interface{}) (resp error) {
-	if nil != resp {
-		return
-	}
 	defer func() {
 		if r := recover(); nil != r {
 			resp = fmt.Errorf("error:[%v], stack:[%s]", r, string(debug.Stack()))
@@ -279,7 +276,7 @@ func bind(result map[string]interface{}, target interface{}) (resp error) {
 			valuei = valuei.Elem()
 		}
 		err := convert(mapValue, valuei, wrapErr)
-		if nil != err {
+		if err != nil {
 			return err
 		}
 	}
@@ -307,7 +304,7 @@ func resolveDataFromRows(rows Rows) ([]map[string]interface{}, error) {
 		return nil, ErrNilRows
 	}
 	columns, err := rows.Columns()
-	if nil != err {
+	if err != nil {
 		return nil, err
 	}
 	length := len(columns)
@@ -319,7 +316,7 @@ func resolveDataFromRows(rows Rows) ([]map[string]interface{}, error) {
 	}
 	for rows.Next() {
 		err = rows.Scan(values...)
-		if nil != err {
+		if err != nil {
 			return nil, err
 		}
 		mp := make(map[string]interface{})
@@ -334,7 +331,7 @@ func resolveDataFromRows(rows Rows) ([]map[string]interface{}, error) {
 
 func lookUpTagName(typeObj reflect.StructField) (string, bool) {
 	var tName string
-	if "" != userDefinedTagName {
+	if userDefinedTagName != "" {
 		tName = userDefinedTagName
 	} else {
 		tName = DefaultTagName
@@ -426,25 +423,25 @@ func handleConvertSlice(mapValue interface{}, mvt, vit reflect.Type, valuei *ref
 		valuei.SetString(mapValueStr)
 	case isIntSeriesType(vitKind):
 		intVal, err := strconv.ParseInt(mapValueStr, 10, 64)
-		if nil != err {
+		if err != nil {
 			return wrapErr(mvt, vit)
 		}
 		valuei.SetInt(intVal)
 	case isUintSeriesType(vitKind):
 		uintVal, err := strconv.ParseUint(mapValueStr, 10, 64)
-		if nil != err {
+		if err != nil {
 			return wrapErr(mvt, vit)
 		}
 		valuei.SetUint(uintVal)
 	case isFloatSeriesType(vitKind):
 		floatVal, err := strconv.ParseFloat(mapValueStr, 64)
-		if nil != err {
+		if err != nil {
 			return wrapErr(mvt, vit)
 		}
 		valuei.SetFloat(floatVal)
 	case vitKind == reflect.Bool:
 		intVal, err := strconv.ParseInt(mapValueStr, 10, 64)
-		if nil != err {
+		if err != nil {
 			return wrapErr(mvt, vit)
 		}
 		if intVal > 0 {
@@ -483,7 +480,7 @@ func byteUnmarshal(mapValueSlice []byte, valuei *reflect.Value, wrapErr convertE
 		pt = *valuei
 	}
 	err := pt.Interface().(ByteUnmarshaler).UnmarshalByte(mapValueSlice)
-	if nil != err {
+	if err != nil {
 		structName := pt.Elem().Type().Name()
 		return fmt.Errorf("[scanner]: %s.UnmarshalByte fail to unmarshal the bytes, err: %s", structName, err)
 	}

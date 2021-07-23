@@ -7,330 +7,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestBuildLockMode(t *testing.T) {
-	type inStruct struct {
-		table  string
-		where  map[string]interface{}
-		fields []string
-	}
-	type outStruct struct {
-		cond string
-		vals []interface{}
-		err  error
-	}
-	var data = []struct {
-		in  inStruct
-		out outStruct
-	}{
-		{
-			in: inStruct{
-				table: "tb",
-				where: map[string]interface{}{
-					"foo":      "bar",
-					"qq":       "tt",
-					"age in":   []interface{}{1, 3, 5, 7, 9},
-					"vx":       []interface{}{1, 3, 5},
-					"faith <>": "Muslim",
-					"_or": []map[string]interface{}{
-						{
-							"aa": 11,
-							"bb": "xswl",
-						},
-						{
-							"cc":    "234",
-							"dd in": []interface{}{7, 8},
-							"_or": []map[string]interface{}{
-								{
-									"neeest_ee <>": "dw42",
-									"neeest_ff in": []interface{}{34, 59},
-								},
-								{
-									"neeest_gg":        1259,
-									"neeest_hh not in": []interface{}{358, 1245},
-								},
-							},
-						},
-					},
-					"_orderby":  "age DESC,score ASC",
-					"_groupby":  "department",
-					"_limit":    []uint{0, 100},
-					"_lockMode": "share",
-				},
-				fields: []string{"id", "name", "age"},
-			},
-			out: outStruct{
-				cond: "SELECT id,name,age FROM tb WHERE (((aa=? AND bb=?) OR (((neeest_ff IN (?,?) AND neeest_ee!=?) OR (neeest_gg=? AND neeest_hh NOT IN (?,?))) AND cc=? AND dd IN (?,?))) AND foo=? AND qq=? AND age IN (?,?,?,?,?) AND vx IN (?,?,?) AND faith!=?) GROUP BY department ORDER BY age DESC,score ASC LIMIT ?,? LOCK IN SHARE MODE",
-				vals: []interface{}{11, "xswl", 34, 59, "dw42", 1259, 358, 1245, "234", 7, 8, "bar", "tt", 1, 3, 5, 7, 9, 1, 3, 5, "Muslim", 0, 100},
-				err:  nil,
-			},
-		},
-		{
-			in: inStruct{
-				table: "tb",
-				where: map[string]interface{}{
-					"name like": "%123",
-					"_lockMode": "exclusive",
-				},
-				fields: nil,
-			},
-			out: outStruct{
-				cond: `SELECT * FROM tb WHERE (name LIKE ?) FOR UPDATE`,
-				vals: []interface{}{"%123"},
-				err:  nil,
-			},
-		},
-		{
-			in: inStruct{
-				table: "tb",
-				where: map[string]interface{}{
-					"name":      "caibirdme",
-					"_lockMode": "share",
-				},
-				fields: nil,
-			},
-			out: outStruct{
-				cond: "SELECT * FROM tb WHERE (name=?) LOCK IN SHARE MODE",
-				vals: []interface{}{"caibirdme"},
-				err:  nil,
-			},
-		},
-		{
-			in: inStruct{
-				table: "tb",
-				where: map[string]interface{}{
-					"foo":       "bar",
-					"_orderby":  "  ",
-					"_lockMode": "exclusive",
-				},
-				fields: nil,
-			},
-			out: outStruct{
-				cond: "SELECT * FROM tb WHERE (foo=?) FOR UPDATE",
-				vals: []interface{}{"bar"},
-				err:  nil,
-			},
-		},
-	}
-	ass := assert.New(t)
-	for _, tc := range data {
-		cond, vals, err := BuildSelect(tc.in.table, tc.in.where, tc.in.fields)
-		ass.Equal(tc.out.err, err)
-		ass.Equal(tc.out.cond, cond)
-		ass.Equal(tc.out.vals, vals)
-	}
-}
-
-func TestBuildHaving(t *testing.T) {
-	type inStruct struct {
-		table       string
-		where       map[string]interface{}
-		selectField []string
-	}
-	type outStruct struct {
-		cond string
-		vals []interface{}
-		err  error
-	}
-	var data = []struct {
-		in  inStruct
-		out outStruct
-	}{
-		{
-			in: inStruct{
-				table: "tb",
-				where: map[string]interface{}{
-					"age > ": 23,
-				},
-				selectField: []string{"count(*) as total"},
-			},
-			out: outStruct{
-				cond: "SELECT count(*) as total FROM tb WHERE (age>?)",
-				vals: []interface{}{23},
-				err:  nil,
-			},
-		},
-		{
-			in: inStruct{
-				table: "tb",
-				where: map[string]interface{}{
-					"age > ":   23,
-					"_groupby": "name",
-					"_having": map[string]interface{}{
-						"total >=": 1000,
-						"total <":  50000,
-						"vx":       []interface{}{1, 3, 5},
-					},
-				},
-				selectField: []string{"name, count(price) as total"},
-			},
-			out: outStruct{
-				cond: "SELECT name, count(price) as total FROM tb WHERE (age>?) GROUP BY name HAVING (vx IN (?,?,?) AND total>=? AND total<?)",
-				vals: []interface{}{23, 1, 3, 5, 1000, 50000},
-				err:  nil,
-			},
-		},
-		{
-			in: inStruct{
-				table: "tb",
-				where: map[string]interface{}{
-					"_groupby": "name",
-					"_having": map[string]interface{}{
-						"total >=": 1000,
-						"total <":  50000,
-					},
-				},
-				selectField: []string{"name, count(price) as total"},
-			},
-			out: outStruct{
-				cond: "SELECT name, count(price) as total FROM tb GROUP BY name HAVING (total>=? AND total<?)",
-				vals: []interface{}{1000, 50000},
-				err:  nil,
-			},
-		},
-		{
-			in: inStruct{
-				table: "tb",
-				where: map[string]interface{}{
-					"_having": map[string]interface{}{
-						"total >=": 1000,
-						"total <":  50000,
-					},
-					"age in": []interface{}{1, 2, 3},
-				},
-				selectField: []string{"name, age"},
-			},
-			out: outStruct{
-				cond: "SELECT name, age FROM tb WHERE (age IN (?,?,?))",
-				vals: []interface{}{1, 2, 3},
-				err:  nil,
-			},
-		},
-		{
-			in: inStruct{
-				table: "tb",
-				where: map[string]interface{}{
-					"_limit": []uint{1},
-					"age in": []interface{}{1, 2, 3},
-				},
-				selectField: []string{"name, age"},
-			},
-			out: outStruct{
-				cond: "SELECT name, age FROM tb WHERE (age IN (?,?,?)) LIMIT ?,?",
-				vals: []interface{}{1, 2, 3, 0, 1},
-				err:  nil,
-			},
-		},
-		{
-			in: inStruct{
-				table: "tb",
-				where: map[string]interface{}{
-					"_limit": []uint{2, 1},
-					"age in": []interface{}{1, 2, 3},
-				},
-				selectField: []string{"name, age"},
-			},
-			out: outStruct{
-				cond: "SELECT name, age FROM tb WHERE (age IN (?,?,?)) LIMIT ?,?",
-				vals: []interface{}{1, 2, 3, 2, 1},
-				err:  nil,
-			},
-		},
-		{
-			in: inStruct{
-				table: "tb",
-				where: map[string]interface{}{
-					"_groupby": "  ",
-					"_having": map[string]interface{}{
-						"total >=": 1000,
-						"total <":  50000,
-					},
-					"age in": []interface{}{1, 2, 3},
-				},
-				selectField: []string{"name, age"},
-			},
-			out: outStruct{
-				cond: "SELECT name, age FROM tb WHERE (age IN (?,?,?))",
-				vals: []interface{}{1, 2, 3},
-				err:  nil,
-			},
-		},
-	}
-	ass := assert.New(t)
-	for _, tc := range data {
-		cond, vals, err := BuildSelect(tc.in.table, tc.in.where, tc.in.selectField)
-		ass.Equal(tc.out.err, err)
-		ass.Equal(tc.out.cond, cond)
-		ass.Equal(tc.out.vals, vals)
-	}
-}
-
-func TestBuildHaving_1(t *testing.T) {
-	type inStruct struct {
-		table       string
-		where       map[string]interface{}
-		selectField []string
-	}
-	type outStruct struct {
-		cond string
-		vals []interface{}
-		err  error
-	}
-	var testCases = []struct {
-		in  inStruct
-		out outStruct
-	}{
-		{
-			in: inStruct{
-				table: "tb",
-				where: map[string]interface{}{
-					"_groupby": "name",
-					"_having": map[string]interface{}{
-						"total IN":     []interface{}{1000, 2000, 3000},
-						"total NOT IN": []interface{}{2000},
-					},
-				},
-				selectField: []string{"name", "COUNT(price) AS total"},
-			},
-			out: outStruct{
-				cond: "SELECT name,COUNT(price) AS total FROM tb GROUP BY name HAVING (total IN (?,?,?) AND total NOT IN (?))",
-				vals: []interface{}{1000, 2000, 3000, 2000},
-				err:  nil,
-			},
-		},
-		{
-			in: inStruct{
-				table: "tb",
-				where: map[string]interface{}{
-					"_groupby": "name",
-					"_having": map[string]interface{}{
-						"total BETWEEN ":        []interface{}{1000, 50000},
-						"total NOT   BETWEEN  ": []interface{}{3000, 3500},
-					},
-				},
-				selectField: []string{"name", "COUNT(price) AS total"},
-			},
-			out: outStruct{
-				cond: "SELECT name,COUNT(price) AS total FROM tb GROUP BY name HAVING ((total BETWEEN ? AND ?) AND (total NOT BETWEEN ? AND ?))",
-				vals: []interface{}{1000, 50000, 3000, 3500},
-				err:  nil,
-			},
-		},
-	}
-
-	ass := assert.New(t)
-	for _, tc := range testCases {
-		cond, vals, err := BuildSelect(tc.in.table, tc.in.where, tc.in.selectField)
-		ass.Equal(tc.out.err, err)
-		ass.Equal(tc.out.cond, cond)
-		ass.Equal(tc.out.vals, vals)
-	}
-}
-
 func Test_BuildInsert(t *testing.T) {
 	ass := assert.New(t)
 	type inStruct struct {
 		table   string
-		setData []map[string]interface{}
+		setData [][]interface{}
 	}
 	type outStruct struct {
 		cond string
@@ -344,15 +25,15 @@ func Test_BuildInsert(t *testing.T) {
 		{
 			in: inStruct{
 				table: "tb",
-				setData: []map[string]interface{}{
+				setData: [][]interface{}{
 					{
-						"foo": "bar",
-						"age": 23,
+						23,
+						"bar",
 					},
 				},
 			},
 			out: outStruct{
-				cond: "INSERT INTO tb (age,foo) VALUES (?,?)",
+				cond: "insert into tb values (?,?)",
 				vals: []interface{}{23, "bar"},
 				err:  nil,
 			},
@@ -365,51 +46,13 @@ func Test_BuildInsert(t *testing.T) {
 		ass.Equal(tc.out.vals, vals)
 	}
 }
-
-func Test_BuildDelete(t *testing.T) {
+func Test_BuildBuildInsertStable(t *testing.T) {
 	ass := assert.New(t)
-	type inStruct struct {
-		table string
-		where map[string]interface{}
-	}
-	type outStruct struct {
-		cond string
-		vals []interface{}
-		err  error
-	}
-	var data = []struct {
-		in  inStruct
-		out outStruct
-	}{
-		{
-			in: inStruct{
-				table: "tb",
-				where: map[string]interface{}{
-					"age >=":   21,
-					"sex in":   []interface{}{"male", "female"},
-					"hobby in": []interface{}{"soccer", "basketball", "tenis"},
-				},
-			},
-			out: outStruct{
-				cond: "DELETE FROM tb WHERE (hobby IN (?,?,?) AND sex IN (?,?) AND age>=?)",
-				vals: []interface{}{"soccer", "basketball", "tenis", "male", "female", 21},
-				err:  nil,
-			},
-		},
-	}
-	for _, tc := range data {
-		cond, vals, err := BuildDelete(tc.in.table, tc.in.where)
-		ass.Equal(tc.out.err, err)
-		ass.Equal(tc.out.cond, cond)
-		ass.Equal(tc.out.vals, vals)
-	}
-}
-
-func Test_BuildUpdate(t *testing.T) {
 	type inStruct struct {
 		table   string
-		where   map[string]interface{}
-		setData map[string]interface{}
+		sTable  string
+		tags    []interface{}
+		setData [][]interface{}
 	}
 	type outStruct struct {
 		cond string
@@ -422,83 +65,30 @@ func Test_BuildUpdate(t *testing.T) {
 	}{
 		{
 			in: inStruct{
-				table: "tb",
-				where: map[string]interface{}{
-					"foo":    "bar",
-					"age >=": 23,
-					"sex in": []interface{}{"male", "female"},
-					"_or": []map[string]interface{}{
-						{
-							"x1":    11,
-							"x2 >=": 45,
-						},
-						{
-							"x3":    "234",
-							"x4 <>": "tx2",
-						},
+				table:  "tb",
+				sTable: "stb",
+				tags:   []interface{}{"t1", 5, 12.3},
+				setData: [][]interface{}{
+					{
+						23,
+						"bar",
 					},
 				},
-				setData: map[string]interface{}{
-					"score":    50,
-					"district": "010",
-				},
 			},
 			out: outStruct{
-				cond: "UPDATE tb SET district=?,score=? WHERE (((x1=? AND x2>=?) OR (x3=? AND x4!=?)) AND foo=? AND sex IN (?,?) AND age>=?)",
-				vals: []interface{}{"010", 50, 11, 45, "234", "tx2", "bar", "male", "female", 23},
+				cond: "insert into tb using stb tags(?,?,?) values (?,?)",
+				vals: []interface{}{"t1", 5, 12.3, 23, "bar"},
 				err:  nil,
-			},
-		},
-		{
-			in: inStruct{
-				table: "tb",
-				where: map[string]interface{}{
-					"foo":    "bar",
-					"age >=": 23,
-					"sex in": []interface{}{"male", "female"},
-					"_limit": 10,
-				},
-				setData: map[string]interface{}{
-					"score":    50,
-					"district": "010",
-				},
-			},
-			out: outStruct{
-				cond: "UPDATE tb SET district=?,score=? WHERE (foo=? AND sex IN (?,?) AND age>=?) LIMIT ?",
-				vals: []interface{}{"010", 50, "bar", "male", "female", 23, 10},
-				err:  nil,
-			},
-		},
-		{
-			in: inStruct{
-				table: "tb",
-				where: map[string]interface{}{
-					"foo":    "bar",
-					"age >=": 23,
-					"sex in": []interface{}{"male", "female"},
-					"_limit": 5.5,
-				},
-				setData: map[string]interface{}{
-					"score":    50,
-					"district": "010",
-				},
-			},
-			out: outStruct{
-				cond: "",
-				vals: nil,
-				err:  errUpdateLimitType,
 			},
 		},
 	}
-	ass := assert.New(t)
 	for _, tc := range data {
-		cond, vals, err := BuildUpdate(tc.in.table, tc.in.where, tc.in.setData)
+		cond, vals, err := BuildInsertStable(tc.in.table, tc.in.sTable, tc.in.tags, tc.in.setData)
 		ass.Equal(tc.out.err, err)
 		ass.Equal(tc.out.cond, cond)
 		ass.Equal(tc.out.vals, vals)
 	}
 }
-
 func Test_BuildSelect(t *testing.T) {
 	type inStruct struct {
 		table  string
@@ -550,7 +140,7 @@ func Test_BuildSelect(t *testing.T) {
 				fields: []string{"id", "name", "age"},
 			},
 			out: outStruct{
-				cond: "SELECT id,name,age FROM tb WHERE (((aa=? AND bb=?) OR (((neeest_ff IN (?,?) AND neeest_ee!=?) OR (neeest_gg=? AND neeest_hh NOT IN (?,?))) AND cc=? AND dd IN (?,?))) AND foo=? AND qq=? AND age IN (?,?,?,?,?) AND vx IN (?,?,?) AND faith!=?) GROUP BY department ORDER BY age DESC,score ASC LIMIT ?,?",
+				cond: "select id,name,age from tb where (((aa=? and bb=?) or (((neeest_ff in (?,?) and neeest_ee!=?) or (neeest_gg=? and neeest_hh not in (?,?))) and cc=? and dd in (?,?))) and foo=? and qq=? and age in (?,?,?,?,?) and vx in (?,?,?) and faith!=?) group by department order by age DESC,score ASC limit ?,?",
 				vals: []interface{}{11, "xswl", 34, 59, "dw42", 1259, 358, 1245, "234", 7, 8, "bar", "tt", 1, 3, 5, 7, 9, 1, 3, 5, "Muslim", 0, 100},
 				err:  nil,
 			},
@@ -564,7 +154,7 @@ func Test_BuildSelect(t *testing.T) {
 				fields: nil,
 			},
 			out: outStruct{
-				cond: `SELECT * FROM tb WHERE (name LIKE ?)`,
+				cond: `select * from tb where (name like ?)`,
 				vals: []interface{}{"%123"},
 				err:  nil,
 			},
@@ -578,7 +168,7 @@ func Test_BuildSelect(t *testing.T) {
 				fields: nil,
 			},
 			out: outStruct{
-				cond: "SELECT * FROM tb WHERE (name=?)",
+				cond: "select * from tb where (name=?)",
 				vals: []interface{}{"caibirdme"},
 				err:  nil,
 			},
@@ -593,8 +183,40 @@ func Test_BuildSelect(t *testing.T) {
 				fields: nil,
 			},
 			out: outStruct{
-				cond: "SELECT * FROM tb WHERE (foo=?)",
+				cond: "select * from tb where (foo=?)",
 				vals: []interface{}{"bar"},
+				err:  nil,
+			},
+		},
+		{
+			in: inStruct{
+				table: "tb",
+				where: map[string]interface{}{
+					"_slimit":  []uint{0, 100},
+					"_groupby": "fool",
+				},
+				fields: []string{"fool", "bar"},
+			},
+			out: outStruct{
+				cond: "select fool,bar from tb group by fool slimit ?,?",
+				vals: []interface{}{0, 100},
+				err:  nil,
+			},
+		},
+		{
+			in: inStruct{
+				table: "tb",
+				where: map[string]interface{}{
+					"_interval": &Interval{
+						Value: 1,
+						Unit:  Day,
+					},
+				},
+				fields: []string{"avg(t1)"},
+			},
+			out: outStruct{
+				cond: "select avg(t1) from tb interval(1d)",
+				vals: nil,
 				err:  nil,
 			},
 		},
@@ -626,7 +248,7 @@ func BenchmarkBuildSelect_Sequelization(b *testing.B) {
 }
 
 func BenchmarkBuildSelect_Parallel(b *testing.B) {
-	expectCond := "SELECT * FROM tb WHERE (foo=? AND qq=? AND age IN (?,?,?,?,?) AND faith!=?) GROUP BY department ORDER BY age DESC LIMIT ?,?"
+	expectCond := "select * from tb where (foo=? and qq=? and age in (?,?,?,?,?) and faith!=?) group by department order by age DESC limit ?,?"
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			cond, _, _ := BuildSelect("tb", map[string]interface{}{
@@ -790,7 +412,7 @@ func Test_BuildIN(t *testing.T) {
 				fields: []string{"id", "name", "age"},
 			},
 			out: outStruct{
-				cond: "SELECT id,name,age FROM tb WHERE (foo=? AND qq=? AND age IN (?,?,?,?,?) AND faith!=?) GROUP BY department ORDER BY age DESC",
+				cond: "select id,name,age from tb where (foo=? and qq=? and age in (?,?,?,?,?) and faith!=?) group by department order by age DESC",
 				vals: []interface{}{"bar", "tt", 1, 3, 5, 7, 9, "Muslim"},
 				err:  nil,
 			},
@@ -805,7 +427,7 @@ func Test_BuildIN(t *testing.T) {
 				fields: []string{"id", "name", "age"},
 			},
 			out: outStruct{
-				cond: "SELECT id,name,age FROM tb WHERE (foo=? AND age IN (?,?,?,?,?))",
+				cond: "select id,name,age from tb where (foo=? and age in (?,?,?,?,?))",
 				vals: []interface{}{"bar", 1, 3, 5, 7, 9},
 				err:  nil,
 			},
@@ -854,7 +476,7 @@ func Test_BuildOrderBy(t *testing.T) {
 				fields: []string{"id", "name", "age"},
 			},
 			out: outStruct{
-				cond: "SELECT id,name,age FROM tb WHERE (foo=?) ORDER BY age DESC,id ASC",
+				cond: "select id,name,age from tb where (foo=?) order by age DESC,id ASC",
 				vals: []interface{}{"bar"},
 				err:  nil,
 			},
@@ -864,12 +486,12 @@ func Test_BuildOrderBy(t *testing.T) {
 				table: "tb",
 				where: map[string]interface{}{
 					"foo":      "bar",
-					"_orderby": "RAND()",
+					"_orderby": "Rand()",
 				},
 				fields: []string{"id", "name", "age"},
 			},
 			out: outStruct{
-				cond: "SELECT id,name,age FROM tb WHERE (foo=?) ORDER BY RAND()",
+				cond: "select id,name,age from tb where (foo=?) order by Rand()",
 				vals: []interface{}{"bar"},
 				err:  nil,
 			},
@@ -908,7 +530,7 @@ func Test_Where_Null(t *testing.T) {
 				fields: []string{"id", "name"},
 			},
 			out: outStruct{
-				cond: "SELECT id,name FROM tb WHERE (aa IS NOT NULL)",
+				cond: "select id,name from tb where (aa is not null)",
 				vals: nil,
 				err:  nil,
 			},
@@ -923,7 +545,7 @@ func Test_Where_Null(t *testing.T) {
 				fields: []string{"id", "name", "age"},
 			},
 			out: outStruct{
-				cond: "SELECT id,name,age FROM tb WHERE (foo=? AND aa IS NOT NULL)",
+				cond: "select id,name,age from tb where (foo=? and aa is not null)",
 				vals: []interface{}{"bar"},
 				err:  nil,
 			},
@@ -938,7 +560,7 @@ func Test_Where_Null(t *testing.T) {
 				fields: []string{"id", "name", "age"},
 			},
 			out: outStruct{
-				cond: "SELECT id,name,age FROM tb WHERE (foo=? AND aa IS NULL)",
+				cond: "select id,name,age from tb where (foo=? and aa is null)",
 				vals: []interface{}{"bar"},
 				err:  nil,
 			},
@@ -954,7 +576,7 @@ func Test_Where_Null(t *testing.T) {
 				fields: []string{"id", "name", "age"},
 			},
 			out: outStruct{
-				cond: "SELECT id,name,age FROM tb WHERE (foo=? AND aa IS NULL AND bb IS NOT NULL)",
+				cond: "select id,name,age from tb where (foo=? and aa is null and bb is not null)",
 				vals: []interface{}{"bar"},
 				err:  nil,
 			},
@@ -1013,7 +635,7 @@ func TestBuildSelect_Limit(t *testing.T) {
 		}, nil)
 		ass.Equal(tc.err, err)
 		if tc.err == nil {
-			ass.Equal(`SELECT * FROM tb LIMIT ?,?`, cond, "where=%+v", tc.limit)
+			ass.Equal(`select * from tb limit ?,?`, cond, "where=%+v", tc.limit)
 			ass.Equal(tc.expect, vals)
 		}
 	}
@@ -1035,13 +657,13 @@ func Test_NotIn(t *testing.T) {
 			"city IN":            []string{"beijing", "shanghai"},
 			"age >":              35,
 			"address":            IsNotNull,
-			" hobbies NOT IN   ": []string{"baseball", "swim", "running"},
+			" hobbies not IN   ": []string{"baseball", "swim", "running"},
 			"_groupby":           "department",
 			"_orderby":           "bonus DESC",
 		},
 	}
 
-	expectCond := `SELECT name,age,sex FROM some_table WHERE (city IN (?,?) AND hobbies NOT IN (?,?,?) AND age>? AND address IS NOT NULL) GROUP BY department ORDER BY bonus DESC`
+	expectCond := `select name,age,sex from some_table where (city in (?,?) and hobbies not in (?,?,?) and age>? and address is not null) group by department order by bonus DESC`
 	expectVals := []interface{}{"beijing", "shanghai", "baseball", "swim", "running", 35}
 
 	ass := assert.New(t)
@@ -1064,12 +686,12 @@ func TestBuildBetween(t *testing.T) {
 		},
 		{
 			"city IN ":    []string{"beijing", "chengdu"},
-			"age BETWEEN": []int{10, 30},
+			"age between": []int{10, 30},
 			"name":        "caibirdme",
 		},
 	}
 
-	expectCond := "SELECT foo,bar FROM tb WHERE (name=? AND city IN (?,?) AND (age BETWEEN ? AND ?))"
+	expectCond := "select foo,bar from tb where (name=? and city in (?,?) and (age between ? and ?))"
 	expectVals := []interface{}{"caibirdme", "beijing", "chengdu", 10, 30}
 
 	ass := assert.New(t)
@@ -1093,13 +715,13 @@ func TestBuildNotBetween(t *testing.T) {
 		},
 		{
 			"city IN ":        []string{"beijing", "chengdu"},
-			"age NOT BETWEEN": []int{10, 30},
+			"age not between": []int{10, 30},
 			"name":            "caibirdme",
 			"_limit":          []uint{10, 20},
 		},
 	}
 
-	expectCond := "SELECT foo,bar FROM tb WHERE (name=? AND city IN (?,?) AND (age NOT BETWEEN ? AND ?)) LIMIT ?,?"
+	expectCond := "select foo,bar from tb where (name=? and city in (?,?) and (age not between ? and ?)) limit ?,?"
 	expectVals := []interface{}{"caibirdme", "beijing", "chengdu", 10, 30, 10, 20}
 
 	ass := assert.New(t)
@@ -1124,14 +746,14 @@ func TestBuildCombinedBetween(t *testing.T) {
 		},
 		{
 			"city IN ":        []string{"beijing", "chengdu"},
-			"age NOT BETWEEN": []int{10, 30},
+			"age not between": []int{10, 30},
 			"name":            "caibirdme",
-			"score BETWEEN":   []float64{3.5, 7.2},
+			"score between":   []float64{3.5, 7.2},
 			"_limit":          []uint{10, 20},
 		},
 	}
 
-	expectCond := "SELECT foo,bar FROM tb WHERE (name=? AND city IN (?,?) AND (score BETWEEN ? AND ?) AND (age NOT BETWEEN ? AND ?)) LIMIT ?,?"
+	expectCond := "select foo,bar from tb where (name=? and city in (?,?) and (score between ? and ?) and (age not between ? and ?)) limit ?,?"
 	expectVals := []interface{}{"caibirdme", "beijing", "chengdu", 3.5, 7.2, 10, 30, 10, 20}
 
 	ass := assert.New(t)
@@ -1168,15 +790,15 @@ func TestLike(t *testing.T) {
 						"foo":      1,
 					},
 					{
-						"bar LIKE": "haha%",
-						"baz LIKE": "%some",
+						"bar like": "haha%",
+						"baz like": "%some",
 						"foo":      1,
 					},
 				},
 				fields: nil,
 			},
 			out: outStruct{
-				cond: `SELECT * FROM tb WHERE (foo=? AND bar LIKE ? AND baz LIKE ?)`,
+				cond: `select * from tb where (foo=? and bar like ? and baz like ?)`,
 				vals: []interface{}{1, "haha%", "%some"},
 				err:  nil,
 			},
@@ -1192,8 +814,8 @@ func TestLike(t *testing.T) {
 						"age in":   []interface{}{1, 3, 5, 7, 9},
 					},
 					{
-						"bar LIKE": "haha%",
-						"baz LIKE": "%some",
+						"bar like": "haha%",
+						"baz like": "%some",
 						"foo":      1,
 						"age IN":   []interface{}{1, 3, 5, 7, 9},
 					},
@@ -1201,7 +823,7 @@ func TestLike(t *testing.T) {
 				fields: nil,
 			},
 			out: outStruct{
-				cond: `SELECT * FROM tb WHERE (foo=? AND age IN (?,?,?,?,?) AND bar LIKE ? AND baz LIKE ?)`,
+				cond: `select * from tb where (foo=? and age in (?,?,?,?,?) and bar like ? and baz like ?)`,
 				vals: []interface{}{1, 1, 3, 5, 7, 9, "haha%", "%some"},
 				err:  nil,
 			},
@@ -1214,13 +836,13 @@ func TestLike(t *testing.T) {
 						"name like": "%James",
 					},
 					{
-						"name LIKE": "%James",
+						"name like": "%James",
 					},
 				},
 				fields: []string{"name"},
 			},
 			out: outStruct{
-				cond: `SELECT name FROM tb WHERE (name LIKE ?)`,
+				cond: `select name from tb where (name like ?)`,
 				vals: []interface{}{"%James"},
 				err:  nil,
 			},
@@ -1244,11 +866,11 @@ func TestNotLike(t *testing.T) {
 			"name  not    like  ": "%ny",
 		},
 		{
-			"name  NOT    LIKE  ": "%ny",
+			"name  not    like  ": "%ny",
 		},
 	}
 
-	expectCond := "SELECT * FROM tb WHERE (name NOT LIKE ?)"
+	expectCond := "select * from tb where (name not like ?)"
 	expectVals := []interface{}{"%ny"}
 
 	ass := assert.New(t)
@@ -1268,12 +890,12 @@ func TestNotLike_1(t *testing.T) {
 			"age":              20,
 		},
 		{
-			"name  NOT LIKE  ": "%ny",
+			"name  not like  ": "%ny",
 			"age":              20,
 		},
 	}
 
-	expectCond := "SELECT * FROM tb WHERE (age=? AND name NOT LIKE ?)"
+	expectCond := "select * from tb where (age=? and name not like ?)"
 	expectVals := []interface{}{20, "%ny"}
 
 	ass := assert.New(t)
@@ -1286,35 +908,15 @@ func TestNotLike_1(t *testing.T) {
 }
 
 func TestFixBug_insert_quote_field(t *testing.T) {
-	cond, vals, err := BuildInsert("tb", []map[string]interface{}{
+	cond, vals, err := BuildInsert("tb", [][]interface{}{
 		{
-			"id":      1,
-			"`order`": 2,
-			"`id`":    3, // I know this is forbidden, but just for test
+			1,
+			2,
+			3, // I know this is forbidden, but just for test
 		},
 	})
 	ass := assert.New(t)
 	ass.NoError(err)
-	ass.Equal("INSERT INTO tb (`id`,`order`,id) VALUES (?,?,?)", cond)
-	ass.Equal([]interface{}{3, 2, 1}, vals)
-}
-
-func TestInsertOnDuplicate(t *testing.T) {
-	cond, vals, err := BuildInsertOnDuplicate(
-		"tb",
-		[]map[string]interface{}{
-			{
-				"a": 1,
-				"b": 2,
-				"c": 3,
-			},
-		},
-		map[string]interface{}{
-			"c": 4,
-		},
-	)
-	ass := assert.New(t)
-	ass.NoError(err)
-	ass.Equal("INSERT INTO tb (a,b,c) VALUES (?,?,?) ON DUPLICATE KEY UPDATE c=?", cond)
-	ass.Equal([]interface{}{1, 2, 3, 4}, vals)
+	ass.Equal("insert into tb values (?,?,?)", cond)
+	ass.Equal([]interface{}{1, 2, 3}, vals)
 }

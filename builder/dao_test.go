@@ -42,7 +42,7 @@ func TestIn(t *testing.T) {
 				"foo": {"bar", "baz"},
 				"age": {5, 7, 9, 11},
 			},
-			outCond: []string{"age IN (?,?,?,?)", "foo IN (?,?)"},
+			outCond: []string{"age in (?,?,?,?)", "foo in (?,?)"},
 			outVals: []interface{}{5, 7, 9, 11, "bar", "baz"},
 		},
 	}
@@ -69,7 +69,7 @@ func TestNestWhere(t *testing.T) {
 					"bb": 4,
 				}),
 			}),
-			outCond: []string{"(aa=? AND bb=?)"},
+			outCond: []string{"(aa=? and bb=?)"},
 			outVals: []interface{}{3, 4},
 		},
 	}
@@ -163,13 +163,13 @@ func TestWhereConnector(t *testing.T) {
 					"qq": {7, 8, 9},
 				}),
 			},
-			outStr:  "(a=? AND b=? AND foo!=? AND sex!=? AND qq IN (?,?,?))",
+			outStr:  "(a=? and b=? and foo!=? and sex!=? and qq in (?,?,?))",
 			outVals: []interface{}{"a", "b", 1, "male", 7, 8, 9},
 		},
 	}
 	ass := assert.New(t)
 	for _, tc := range data {
-		actualStr, actualVals := whereConnector("AND", tc.in...)
+		actualStr, actualVals := whereConnector("and", tc.in...)
 		ass.Equal(tc.outStr, actualStr)
 		ass.Equal(tc.outVals, actualVals)
 	}
@@ -178,8 +178,10 @@ func TestWhereConnector(t *testing.T) {
 func TestBuildInsert(t *testing.T) {
 	var data = []struct {
 		table      string
+		stable     string
+		tags       []interface{}
 		insertType insertType
-		data       []map[string]interface{}
+		data       [][]interface{}
 		outStr     string
 		outVals    []interface{}
 		outErr     error
@@ -187,177 +189,32 @@ func TestBuildInsert(t *testing.T) {
 		{
 			table:      "tb1",
 			insertType: commonInsert,
-			data: []map[string]interface{}{
+			stable:     "stable1",
+			tags: []interface{}{
+				1, "2", 3.5,
+			},
+			data: [][]interface{}{
 				{
-					"foo": 1,
-					"bar": 2,
+					1,
+					2,
 				},
 				{
-					"foo": 3,
-					"bar": 4,
+					3,
+					4,
 				},
 				{
-					"foo": 5,
-					"bar": 6,
+					5,
+					6,
 				},
 			},
-			outStr:  "INSERT INTO tb1 (bar,foo) VALUES (?,?),(?,?),(?,?)",
-			outVals: []interface{}{2, 1, 4, 3, 6, 5},
-			outErr:  nil,
-		},
-		{
-			table:      "tb1",
-			insertType: replaceInsert,
-			data: []map[string]interface{}{
-				{
-					"foo": 1,
-					"bar": 2,
-				},
-				{
-					"foo": 3,
-					"bar": 4,
-				},
-				{
-					"foo": 5,
-					"bar": 6,
-				},
-			},
-			outStr:  "REPLACE INTO tb1 (bar,foo) VALUES (?,?),(?,?),(?,?)",
-			outVals: []interface{}{2, 1, 4, 3, 6, 5},
-			outErr:  nil,
-		},
-		{
-			table:      "tb1",
-			insertType: ignoreInsert,
-			data: []map[string]interface{}{
-				{
-					"foo": 1,
-					"bar": 2,
-				},
-				{
-					"foo": 3,
-					"bar": 4,
-				},
-				{
-					"foo": 5,
-					"bar": 6,
-				},
-			},
-			outStr:  "INSERT IGNORE INTO tb1 (bar,foo) VALUES (?,?),(?,?),(?,?)",
-			outVals: []interface{}{2, 1, 4, 3, 6, 5},
+			outStr:  "insert into tb1 using stable1 tags(?,?,?) values (?,?),(?,?),(?,?)",
+			outVals: []interface{}{1, "2", 3.5, 1, 2, 3, 4, 5, 6},
 			outErr:  nil,
 		},
 	}
 	ass := assert.New(t)
 	for _, tc := range data {
-		actualStr, actualVals, err := buildInsert(tc.table, tc.data, tc.insertType)
-		ass.Equal(tc.outErr, err)
-		ass.Equal(tc.outStr, actualStr)
-		ass.Equal(tc.outVals, actualVals)
-	}
-}
-
-func TestBuildInsertOnDuplicate(t *testing.T) {
-	var data = []struct {
-		table   string
-		data    []map[string]interface{}
-		update  map[string]interface{}
-		outErr  error
-		outStr  string
-		outVals []interface{}
-	}{
-		{
-			table: "tb",
-			data: []map[string]interface{}{
-				{
-					"a": 1,
-					"b": 2,
-					"c": 3,
-				},
-				{
-					"a": 4,
-					"b": 5,
-					"c": 6,
-				},
-			},
-			update: map[string]interface{}{
-				"b": 7,
-				"c": 8,
-			},
-			outErr:  nil,
-			outStr:  "INSERT INTO tb (a,b,c) VALUES (?,?,?),(?,?,?) ON DUPLICATE KEY UPDATE b=?,c=?",
-			outVals: []interface{}{1, 2, 3, 4, 5, 6, 7, 8},
-		},
-	}
-	ass := assert.New(t)
-	for _, tc := range data {
-		cond, vals, err := buildInsertOnDuplicate(tc.table, tc.data, tc.update)
-		ass.Equal(tc.outErr, err)
-		ass.Equal(tc.outStr, cond)
-		ass.Equal(tc.outVals, vals)
-	}
-}
-
-func TestBuildUpdate(t *testing.T) {
-	var data = []struct {
-		table      string
-		conditions []Comparable
-		data       map[string]interface{}
-		outErr     error
-		outStr     string
-		outVals    []interface{}
-	}{
-		{
-			table: "tb",
-			conditions: []Comparable{
-				Eq(map[string]interface{}{
-					"foo": "bar",
-					"qq":  1,
-				}),
-			},
-			data: map[string]interface{}{
-				"name": "deen",
-				"age":  23,
-			},
-			outErr:  nil,
-			outStr:  "UPDATE tb SET age=?,name=? WHERE (foo=? AND qq=?)",
-			outVals: []interface{}{23, "deen", "bar", 1},
-		},
-	}
-	ass := assert.New(t)
-	for _, tc := range data {
-		cond, vals, err := buildUpdate(tc.table, tc.data, 0, tc.conditions...)
-		ass.Equal(tc.outErr, err)
-		ass.Equal(tc.outStr, cond)
-		ass.Equal(tc.outVals, vals)
-	}
-}
-
-func TestBuildDelete(t *testing.T) {
-	var data = []struct {
-		table   string
-		where   []Comparable
-		outStr  string
-		outVals []interface{}
-		outErr  error
-	}{
-		{
-			table: "tb",
-			where: []Comparable{
-				Eq(map[string]interface{}{
-					"foo": 1,
-					"bar": 2,
-					"baz": "tt",
-				}),
-			},
-			outStr:  "DELETE FROM tb WHERE (bar=? AND baz=? AND foo=?)",
-			outVals: []interface{}{2, "tt", 1},
-			outErr:  nil,
-		},
-	}
-	ass := assert.New(t)
-	for _, tc := range data {
-		actualStr, actualVals, err := buildDelete(tc.table, tc.where...)
+		actualStr, actualVals, err := buildInsert(tc.table, tc.stable, tc.tags, tc.data, tc.insertType)
 		ass.Equal(tc.outErr, err)
 		ass.Equal(tc.outStr, actualStr)
 		ass.Equal(tc.outVals, actualVals)
@@ -372,6 +229,9 @@ func TestBuildSelect(t *testing.T) {
 		groupBy    string
 		orderBy    string
 		limit      *eleLimit
+		sLimit     *eleLimit
+		fill       string
+		interval   string
 		lockMode   string
 		outStr     string
 		outVals    []interface{}
@@ -413,15 +273,15 @@ func TestBuildSelect(t *testing.T) {
 				begin: 10,
 				step:  20,
 			},
-			lockMode: "exclusive",
-			outErr:   nil,
-			outStr:   "SELECT foo,bar FROM tb WHERE (bar=? AND foo=? AND qq IN (?,?,?) AND ((aa=? AND bb=?) OR (cc=? AND dd=?))) ORDER BY foo DESC,baz ASC LIMIT ?,? FOR UPDATE",
-			outVals:  []interface{}{2, 1, 4, 5, 6, 3, 4, 7, 8, 10, 20},
+
+			outErr:  nil,
+			outStr:  "select foo,bar from tb where (bar=? and foo=? and qq in (?,?,?) and ((aa=? and bb=?) or (cc=? and dd=?))) order by foo DESC,baz ASC limit ?,?",
+			outVals: []interface{}{2, 1, 4, 5, 6, 3, 4, 7, 8, 10, 20},
 		},
 	}
 	ass := assert.New(t)
 	for _, tc := range data {
-		cond, vals, err := buildSelect(tc.table, tc.fields, tc.groupBy, tc.orderBy, tc.lockMode, tc.limit, tc.conditions...)
+		cond, vals, err := buildSelect(tc.table, tc.fields, tc.groupBy, tc.orderBy, tc.sLimit, tc.limit, tc.interval, tc.fill, tc.conditions...)
 		ass.Equal(tc.outErr, err)
 		ass.Equal(tc.outStr, cond)
 		ass.Equal(tc.outVals, vals)
